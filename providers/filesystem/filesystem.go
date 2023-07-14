@@ -75,7 +75,7 @@ func (b *Bucket) Iter(ctx context.Context, dir string, f func(name string, attrs
 		return err
 	}
 	for _, file := range files {
-		name := filepath.Join(absDir, file.Name())
+		name := filepath.Join(dir, file.Name())
 
 		if file.IsDir() {
 			empty, err := isDirEmpty(filepath.Join(absDir, file.Name()))
@@ -104,7 +104,8 @@ func (b *Bucket) Iter(ctx context.Context, dir string, f func(name string, attrs
 
 		attrs := objstore.EmptyObjectAttributes
 		if params.WithUpdatedAt {
-			stat, err := os.Stat(name)
+			absPath := filepath.Join(absDir, name)
+			stat, err := os.Stat(absPath)
 			if err != nil {
 				return errors.Wrapf(err, "unable stat %s", name)
 			}
