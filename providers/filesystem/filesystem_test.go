@@ -12,7 +12,6 @@ import (
 	"testing"
 
 	"github.com/efficientgo/core/testutil"
-	"github.com/stretchr/testify/require"
 
 	"github.com/thanos-io/objstore"
 )
@@ -68,11 +67,11 @@ func TestIter_CancelledContext(t *testing.T) {
 func TestIter(t *testing.T) {
 	dir := t.TempDir()
 	f, err := os.CreateTemp(dir, "test")
-	require.NoError(t, err)
+	testutil.Ok(t, err)
 	defer f.Close()
 
 	stat, err := f.Stat()
-	require.NoError(t, err)
+	testutil.Ok(t, err)
 
 	cases := []struct {
 		name          string
