@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 
@@ -16,12 +17,11 @@ import (
 	"github.com/go-kit/log"
 	"github.com/pkg/errors"
 	"github.com/prometheus/common/version"
+	"github.com/thanos-io/objstore"
 	"golang.org/x/oauth2/google"
 	"google.golang.org/api/iterator"
 	"google.golang.org/api/option"
 	"gopkg.in/yaml.v2"
-
-	"github.com/thanos-io/objstore"
 )
 
 // DirDelim is the delimiter used to model a directory structure in an object store bucket.
@@ -91,9 +91,17 @@ func (b *Bucket) Name() string {
 	return b.name
 }
 
-// Iter calls f for each entry in the given directory. The argument to f is the full
-// object name including the prefix of the inspected directory.
-func (b *Bucket) Iter(ctx context.Context, dir string, f func(name string, attrs objstore.ObjectAttributes) error, options ...objstore.IterOption) error {
+func (b *Bucket) SupportedIterOptions() []objstore.IterOptionType {
+	return []objstore.IterOptionType{objstore.Recursive, objstore.UpdatedAt}
+}
+
+func (b *Bucket) IterWithAttributes(ctx context.Context, dir string, f func(attrs objstore.IterObjectAttributes) error, options ...objstore.IterOption) error {
+	for _, opt := range options {
+		if !slices.Contains(b.SupportedIterOptions(), opt.Type) {
+			return fmt.Errorf("%w: %v", objstore.ErrOptionNotSupported, opt.Type)
+		}
+	}
+
 	// Ensure the object name actually ends with a dir suffix. Otherwise we'll just iterate the
 	// object itself as one prefix item.
 	if dir != "" {
@@ -101,21 +109,17 @@ func (b *Bucket) Iter(ctx context.Context, dir string, f func(name string, attrs
 	}
 
 	appliedOpts := objstore.ApplyIterOptions(options...)
-	query := &storage.Query{
-		Prefix:    dir,
-		Delimiter: DirDelim,
-	}
+
 	// If recursive iteration is enabled we should pass an empty delimiter.
+	delimiter := DirDelim
 	if appliedOpts.Recursive {
-		query.Delimiter = ""
-	}
-	if appliedOpts.WithUpdatedAt {
-		if err := query.SetAttrSelection([]string{"Updated"}); err != nil {
-			return err
-		}
+		delimiter = ""
 	}
 
-	it := b.bkt.Objects(ctx, query)
+	it := b.bkt.Objects(ctx, &storage.Query{
+		Prefix:    dir,
+		Delimiter: delimiter,
+	})
 	for {
 		select {
 		case <-ctx.Done():
@@ -129,11 +133,32 @@ func (b *Bucket) Iter(ctx context.Context, dir string, f func(name string, attrs
 		if err != nil {
 			return err
 		}
-		objAttrs := objstore.ObjectAttributes{LastModified: attrs.Updated}
-		if err := f(attrs.Prefix+attrs.Name, objAttrs); err != nil {
+
+		objAttrs := objstore.IterObjectAttributes{Name: attrs.Prefix + attrs.Name}
+		if appliedOpts.LastModified {
+			objAttrs.SetLastModified(attrs.Updated)
+		}
+		if err := f(objAttrs); err != nil {
 			return err
 		}
 	}
+}
+
+// Iter calls f for each entry in the given directory. The argument to f is the full
+// object name including the prefix of the inspected directory.
+func (b *Bucket) Iter(ctx context.Context, dir string, f func(string) error, opts ...objstore.IterOption) error {
+	// Only include recursive option since attributes are not used in this method.
+	var filteredOpts []objstore.IterOption
+	for _, opt := range opts {
+		if opt.Type == objstore.Recursive {
+			filteredOpts = append(filteredOpts, opt)
+			break
+		}
+	}
+
+	return b.IterWithAttributes(ctx, dir, func(attrs objstore.IterObjectAttributes) error {
+		return f(attrs.Name)
+	}, filteredOpts...)
 }
 
 // Get returns a reader for the given object name.

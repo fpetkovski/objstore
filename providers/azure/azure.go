@@ -5,8 +5,10 @@ package azure
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"os"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -180,9 +182,17 @@ func NewBucketWithConfig(logger log.Logger, conf Config, component string) (*Buc
 	return bkt, nil
 }
 
-// Iter calls f for each entry in the given directory. The argument to f is the full
-// object name including the prefix of the inspected directory.
-func (b *Bucket) Iter(ctx context.Context, dir string, f func(name string, _ objstore.ObjectAttributes) error, options ...objstore.IterOption) error {
+func (b *Bucket) SupportedIterOptions() []objstore.IterOptionType {
+	return []objstore.IterOptionType{objstore.Recursive, objstore.UpdatedAt}
+}
+
+func (b *Bucket) IterWithAttributes(ctx context.Context, dir string, f func(attrs objstore.IterObjectAttributes) error, options ...objstore.IterOption) error {
+	for _, opt := range options {
+		if !slices.Contains(b.SupportedIterOptions(), opt.Type) {
+			return fmt.Errorf("%w: %v", objstore.ErrOptionNotSupported, opt.Type)
+		}
+	}
+
 	prefix := dir
 	if prefix != "" && !strings.HasSuffix(prefix, DirDelim) {
 		prefix += DirDelim
@@ -198,7 +208,13 @@ func (b *Bucket) Iter(ctx context.Context, dir string, f func(name string, _ obj
 				return err
 			}
 			for _, blob := range resp.Segment.BlobItems {
-				if err := f(*blob.Name, objstore.EmptyObjectAttributes); err != nil {
+				attrs := objstore.IterObjectAttributes{
+					Name: *blob.Name,
+				}
+				if params.LastModified {
+					attrs.SetLastModified(*blob.Properties.LastModified)
+				}
+				if err := f(attrs); err != nil {
 					return err
 				}
 			}
@@ -214,17 +230,40 @@ func (b *Bucket) Iter(ctx context.Context, dir string, f func(name string, _ obj
 			return err
 		}
 		for _, blobItem := range resp.Segment.BlobItems {
-			if err := f(*blobItem.Name, objstore.EmptyObjectAttributes); err != nil {
+			attrs := objstore.IterObjectAttributes{
+				Name: *blobItem.Name,
+			}
+			if params.LastModified {
+				attrs.SetLastModified(*blobItem.Properties.LastModified)
+			}
+			if err := f(attrs); err != nil {
 				return err
 			}
 		}
 		for _, blobPrefix := range resp.Segment.BlobPrefixes {
-			if err := f(*blobPrefix.Name, objstore.EmptyObjectAttributes); err != nil {
+			if err := f(objstore.IterObjectAttributes{Name: *blobPrefix.Name}); err != nil {
 				return err
 			}
 		}
 	}
 	return nil
+}
+
+// Iter calls f for each entry in the given directory. The argument to f is the full
+// object name including the prefix of the inspected directory.
+func (b *Bucket) Iter(ctx context.Context, dir string, f func(string) error, opts ...objstore.IterOption) error {
+	// Only include recursive option since attributes are not used in this method.
+	var filteredOpts []objstore.IterOption
+	for _, opt := range opts {
+		if opt.Type == objstore.Recursive {
+			filteredOpts = append(filteredOpts, opt)
+			break
+		}
+	}
+
+	return b.IterWithAttributes(ctx, dir, func(attrs objstore.IterObjectAttributes) error {
+		return f(attrs.Name)
+	}, filteredOpts...)
 }
 
 // IsObjNotFoundErr returns true if error means that object is not found. Relevant to Get operations.

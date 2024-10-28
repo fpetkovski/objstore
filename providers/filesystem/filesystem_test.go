@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/efficientgo/core/testutil"
 
@@ -56,7 +57,7 @@ func TestIter_CancelledContext(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	err = b.Iter(ctx, "", func(s string, _ objstore.ObjectAttributes) error {
+	err = b.Iter(ctx, "", func(s string) error {
 		return nil
 	})
 
@@ -64,7 +65,7 @@ func TestIter_CancelledContext(t *testing.T) {
 	testutil.Equals(t, context.Canceled, err)
 }
 
-func TestIter(t *testing.T) {
+func TestIterWithAttributes(t *testing.T) {
 	dir := t.TempDir()
 	f, err := os.CreateTemp(dir, "test")
 	testutil.Ok(t, err)
@@ -74,23 +75,20 @@ func TestIter(t *testing.T) {
 	testutil.Ok(t, err)
 
 	cases := []struct {
-		name          string
-		opts          []objstore.IterOption
-		expectedAttrs objstore.ObjectAttributes
+		name              string
+		opts              []objstore.IterOption
+		expectedUpdatedAt time.Time
 	}{
 		{
-			name:          "no options",
-			opts:          nil,
-			expectedAttrs: objstore.EmptyObjectAttributes,
+			name: "no options",
+			opts: nil,
 		},
 		{
 			name: "with updated at",
 			opts: []objstore.IterOption{
-				objstore.WithUpdatedAt,
+				objstore.WithUpdatedAt(),
 			},
-			expectedAttrs: objstore.ObjectAttributes{
-				LastModified: stat.ModTime(),
-			},
+			expectedUpdatedAt: stat.ModTime(),
 		},
 	}
 
@@ -99,16 +97,23 @@ func TestIter(t *testing.T) {
 			b, err := NewBucket(dir)
 			testutil.Ok(t, err)
 
-			var attrs objstore.ObjectAttributes
+			var attrs objstore.IterObjectAttributes
 
 			ctx := context.Background()
-			err = b.Iter(ctx, "", func(s string, objAttrs objstore.ObjectAttributes) error {
-				attrs = objAttrs
+			err = b.IterWithAttributes(ctx, "", func(objectAttrs objstore.IterObjectAttributes) error {
+				attrs = objectAttrs
 				return nil
 			}, tc.opts...)
 
 			testutil.Ok(t, err)
-			testutil.Equals(t, tc.expectedAttrs, attrs)
+
+			lastModified, ok := attrs.LastModified()
+			if zero := tc.expectedUpdatedAt.IsZero(); zero {
+				testutil.Equals(t, false, ok)
+			} else {
+				testutil.Equals(t, true, ok)
+				testutil.Equals(t, tc.expectedUpdatedAt, lastModified)
+			}
 		})
 
 	}

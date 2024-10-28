@@ -11,6 +11,7 @@ import (
 	"math/rand"
 	"net/http"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -21,9 +22,8 @@ import (
 	"github.com/pkg/errors"
 	"gopkg.in/yaml.v2"
 
-	"github.com/thanos-io/objstore/clientutil"
-
 	"github.com/thanos-io/objstore"
+	"github.com/thanos-io/objstore/clientutil"
 )
 
 // PartSize is a part size for multi part upload.
@@ -204,9 +204,13 @@ func validate(config Config) error {
 	return nil
 }
 
-// Iter calls f for each entry in the given directory (not recursive). The argument to f is the full
+func (b *Bucket) SupportedIterOptions() []objstore.IterOptionType {
+	return []objstore.IterOptionType{objstore.Recursive}
+}
+
+// Iter calls f for each entry in the given directory. The argument to f is the full
 // object name including the prefix of the inspected directory.
-func (b *Bucket) Iter(ctx context.Context, dir string, f func(name string, _ objstore.ObjectAttributes) error, options ...objstore.IterOption) error {
+func (b *Bucket) Iter(ctx context.Context, dir string, f func(string) error, options ...objstore.IterOption) error {
 	if dir != "" {
 		dir = strings.TrimSuffix(dir, objstore.DirDelim) + objstore.DirDelim
 	}
@@ -228,13 +232,13 @@ func (b *Bucket) Iter(ctx context.Context, dir string, f func(name string, _ obj
 		marker = alioss.Marker(objects.NextMarker)
 
 		for _, object := range objects.Objects {
-			if err := f(object.Key, objstore.EmptyObjectAttributes); err != nil {
+			if err := f(object.Key); err != nil {
 				return errors.Wrapf(err, "callback func invoke for object %s failed ", object.Key)
 			}
 		}
 
 		for _, object := range objects.CommonPrefixes {
-			if err := f(object, objstore.EmptyObjectAttributes); err != nil {
+			if err := f(object); err != nil {
 				return errors.Wrapf(err, "callback func invoke for directory %s failed", object)
 			}
 		}
@@ -244,6 +248,18 @@ func (b *Bucket) Iter(ctx context.Context, dir string, f func(name string, _ obj
 	}
 
 	return nil
+}
+
+func (b *Bucket) IterWithAttributes(ctx context.Context, dir string, f func(attrs objstore.IterObjectAttributes) error, options ...objstore.IterOption) error {
+	for _, opt := range options {
+		if !slices.Contains(b.SupportedIterOptions(), opt.Type) {
+			return fmt.Errorf("%w: %v", objstore.ErrOptionNotSupported, opt.Type)
+		}
+	}
+
+	return b.Iter(ctx, dir, func(name string) error {
+		return f(objstore.IterObjectAttributes{Name: name})
+	}, options...)
 }
 
 func (b *Bucket) Name() string {
@@ -280,7 +296,7 @@ func NewTestBucketFromConfig(t testing.TB, c Config, reuseBucket bool) (objstore
 	}
 
 	if reuseBucket {
-		if err := b.Iter(context.Background(), "", func(f string, _ objstore.ObjectAttributes) error {
+		if err := b.Iter(context.Background(), "", func(_ string) error {
 			return errors.Errorf("bucket %s is not empty", c.Bucket)
 		}); err != nil {
 			return nil, nil, errors.Wrapf(err, "oss check bucket %s", c.Bucket)

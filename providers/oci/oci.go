@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -98,9 +99,13 @@ func (b *Bucket) Name() string {
 	return b.name
 }
 
-// Iter calls f for each entry in the given directory (not recursive). The argument to f is the full
+func (b *Bucket) SupportedIterOptions() []objstore.IterOptionType {
+	return []objstore.IterOptionType{objstore.Recursive}
+}
+
+// Iter calls f for each entry in the given directory. The argument to f is the full
 // object name including the prefix of the inspected directory.
-func (b *Bucket) Iter(ctx context.Context, dir string, f func(name string, _ objstore.ObjectAttributes) error, options ...objstore.IterOption) error {
+func (b *Bucket) Iter(ctx context.Context, dir string, f func(string) error, options ...objstore.IterOption) error {
 	// Ensure the object name actually ends with a dir suffix. Otherwise we'll just iterate the
 	// object itself as one prefix item.
 	if dir != "" {
@@ -118,12 +123,25 @@ func (b *Bucket) Iter(ctx context.Context, dir string, f func(name string, _ obj
 		if objectName == "" || objectName == dir {
 			continue
 		}
-		if err := f(objectName, objstore.EmptyObjectAttributes); err != nil {
+
+		if err := f(objectName); err != nil {
 			return err
 		}
 	}
 
 	return nil
+}
+
+func (b *Bucket) IterWithAttributes(ctx context.Context, dir string, f func(attrs objstore.IterObjectAttributes) error, options ...objstore.IterOption) error {
+	for _, opt := range options {
+		if !slices.Contains(b.SupportedIterOptions(), opt.Type) {
+			return fmt.Errorf("%w: %v", objstore.ErrOptionNotSupported, opt.Type)
+		}
+	}
+
+	return b.Iter(ctx, dir, func(name string) error {
+		return f(objstore.IterObjectAttributes{Name: name})
+	}, options...)
 }
 
 // Get returns a reader for the given object name.

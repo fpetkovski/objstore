@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -203,9 +204,13 @@ func (c *Container) Name() string {
 	return c.name
 }
 
+func (c *Container) SupportedIterOptions() []objstore.IterOptionType {
+	return []objstore.IterOptionType{objstore.Recursive}
+}
+
 // Iter calls f for each entry in the given directory. The argument to f is the full
 // object name including the prefix of the inspected directory.
-func (c *Container) Iter(ctx context.Context, dir string, f func(name string, _ objstore.ObjectAttributes) error, options ...objstore.IterOption) error {
+func (c *Container) Iter(ctx context.Context, dir string, f func(string) error, options ...objstore.IterOption) error {
 	if dir != "" {
 		dir = strings.TrimSuffix(dir, string(DirDelim)) + string(DirDelim)
 	}
@@ -223,16 +228,29 @@ func (c *Container) Iter(ctx context.Context, dir string, f func(name string, _ 
 		if err != nil {
 			return objects, errors.Wrap(err, "list object names")
 		}
+
 		for _, object := range objects {
 			if object == SegmentsDir {
 				continue
 			}
-			if err := f(object, objstore.EmptyObjectAttributes); err != nil {
+			if err := f(object); err != nil {
 				return objects, errors.Wrap(err, "iteration over objects")
 			}
 		}
 		return objects, nil
 	})
+}
+
+func (c *Container) IterWithAttributes(ctx context.Context, dir string, f func(attrs objstore.IterObjectAttributes) error, options ...objstore.IterOption) error {
+	for _, opt := range options {
+		if !slices.Contains(c.SupportedIterOptions(), opt.Type) {
+			return fmt.Errorf("%w: %v", objstore.ErrOptionNotSupported, opt.Type)
+		}
+	}
+
+	return c.Iter(ctx, dir, func(name string) error {
+		return f(objstore.IterObjectAttributes{Name: name})
+	}, options...)
 }
 
 func (c *Container) get(name string, headers swift.Headers, checkHash bool) (io.ReadCloser, error) {
@@ -363,7 +381,7 @@ func NewTestContainer(t testing.TB) (objstore.Bucket, func(), error) {
 		if err != nil {
 			return nil, nil, errors.Wrap(err, "initializing new container")
 		}
-		if err := c.Iter(context.Background(), "", func(f string, _ objstore.ObjectAttributes) error {
+		if err := c.Iter(context.Background(), "", func(f string) error {
 			return errors.Errorf("container %s is not empty", c.Name())
 		}); err != nil {
 			return nil, nil, errors.Wrapf(err, "check container %s", c.Name())

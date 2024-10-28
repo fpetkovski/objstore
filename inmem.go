@@ -6,7 +6,9 @@ package objstore
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"io"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -50,7 +52,7 @@ func (b *InMemBucket) Objects() map[string][]byte {
 
 // Iter calls f for each entry in the given directory. The argument to f is the full
 // object name including the prefix of the inspected directory.
-func (b *InMemBucket) Iter(ctx context.Context, dir string, f func(name string, attrs ObjectAttributes) error, options ...IterOption) error {
+func (b *InMemBucket) Iter(_ context.Context, dir string, f func(string) error, options ...IterOption) error {
 	unique := map[string]struct{}{}
 	params := ApplyIterOptions(options...)
 
@@ -99,11 +101,27 @@ func (b *InMemBucket) Iter(ctx context.Context, dir string, f func(name string, 
 	})
 
 	for _, k := range keys {
-		if err := f(k, EmptyObjectAttributes); err != nil {
+		if err := f(k); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+func (i *InMemBucket) SupportedIterOptions() []IterOptionType {
+	return []IterOptionType{Recursive}
+}
+
+func (b *InMemBucket) IterWithAttributes(ctx context.Context, dir string, f func(attrs IterObjectAttributes) error, options ...IterOption) error {
+	for _, opt := range options {
+		if !slices.Contains(b.SupportedIterOptions(), opt.Type) {
+			return fmt.Errorf("%w: %v", ErrOptionNotSupported, opt.Type)
+		}
+	}
+
+	return b.Iter(ctx, dir, func(name string) error {
+		return f(IterObjectAttributes{Name: name})
+	}, options...)
 }
 
 // Get returns a reader for the given object name.

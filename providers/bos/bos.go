@@ -11,6 +11,7 @@ import (
 	"math/rand"
 	"net/http"
 	"os"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -175,16 +176,25 @@ func (b *Bucket) Upload(_ context.Context, name string, r io.Reader) error {
 	return nil
 }
 
-// Iter calls f for each entry in the given directory (not recursive). The argument to f is the full
-// object name including the prefix of the inspected directory.
-func (b *Bucket) Iter(ctx context.Context, dir string, f func(name string, _ objstore.ObjectAttributes) error, opt ...objstore.IterOption) error {
+func (b *Bucket) SupportedIterOptions() []objstore.IterOptionType {
+	return []objstore.IterOptionType{objstore.Recursive, objstore.UpdatedAt}
+}
+
+func (b *Bucket) IterWithAttributes(ctx context.Context, dir string, f func(attrs objstore.IterObjectAttributes) error, options ...objstore.IterOption) error {
+	for _, opt := range options {
+		if !slices.Contains(b.SupportedIterOptions(), opt.Type) {
+			return fmt.Errorf("%w: %v", objstore.ErrOptionNotSupported, opt.Type)
+		}
+	}
+
 	if dir != "" {
 		dir = strings.TrimSuffix(dir, objstore.DirDelim) + objstore.DirDelim
 	}
 
 	delimiter := objstore.DirDelim
 
-	if objstore.ApplyIterOptions(opt...).Recursive {
+	params := objstore.ApplyIterOptions(options...)
+	if params.Recursive {
 		delimiter = ""
 	}
 
@@ -206,13 +216,25 @@ func (b *Bucket) Iter(ctx context.Context, dir string, f func(name string, _ obj
 
 		marker = objects.NextMarker
 		for _, object := range objects.Contents {
-			if err := f(object.Key, objstore.EmptyObjectAttributes); err != nil {
+			attrs := objstore.IterObjectAttributes{
+				Name: object.Key,
+			}
+
+			if params.LastModified && object.LastModified != "" {
+				lastModified, err := time.Parse(time.RFC1123, object.LastModified)
+				if err != nil {
+					return fmt.Errorf("iter: get last modified: %w", err)
+				}
+				attrs.SetLastModified(lastModified)
+			}
+
+			if err := f(attrs); err != nil {
 				return err
 			}
 		}
 
 		for _, object := range objects.CommonPrefixes {
-			if err := f(object.Prefix, objstore.EmptyObjectAttributes); err != nil {
+			if err := f(objstore.IterObjectAttributes{Name: object.Prefix}); err != nil {
 				return err
 			}
 		}
@@ -221,6 +243,23 @@ func (b *Bucket) Iter(ctx context.Context, dir string, f func(name string, _ obj
 		}
 	}
 	return nil
+}
+
+// Iter calls f for each entry in the given directory. The argument to f is the full
+// object name including the prefix of the inspected directory.
+func (b *Bucket) Iter(ctx context.Context, dir string, f func(string) error, opts ...objstore.IterOption) error {
+	// Only include recursive option since attributes are not used in this method.
+	var filteredOpts []objstore.IterOption
+	for _, opt := range opts {
+		if opt.Type == objstore.Recursive {
+			filteredOpts = append(filteredOpts, opt)
+			break
+		}
+	}
+
+	return b.IterWithAttributes(ctx, dir, func(attrs objstore.IterObjectAttributes) error {
+		return f(attrs.Name)
+	}, filteredOpts...)
 }
 
 // Get returns a reader for the given object name.
@@ -347,7 +386,7 @@ func NewTestBucket(t testing.TB) (objstore.Bucket, func(), error) {
 			return nil, nil, err
 		}
 
-		if err := b.Iter(context.Background(), "", func(f string, _ objstore.ObjectAttributes) error {
+		if err := b.Iter(context.Background(), "", func(f string) error {
 			return errors.Errorf("bucket %s is not empty", c.Bucket)
 		}); err != nil {
 			return nil, nil, errors.Wrapf(err, "checking bucket %s", c.Bucket)

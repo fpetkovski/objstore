@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -385,18 +386,28 @@ func ValidateForTests(conf Config) error {
 	return nil
 }
 
-// Iter calls f for each entry in the given directory. The argument to f is the full
-// object name including the prefix of the inspected directory.
-func (b *Bucket) Iter(ctx context.Context, dir string, f func(name string, attrs objstore.ObjectAttributes) error, options ...objstore.IterOption) error {
+func (b *Bucket) SupportedIterOptions() []objstore.IterOptionType {
+	return []objstore.IterOptionType{objstore.Recursive, objstore.UpdatedAt}
+}
+
+func (b *Bucket) IterWithAttributes(ctx context.Context, dir string, f func(attrs objstore.IterObjectAttributes) error, options ...objstore.IterOption) error {
+	for _, opt := range options {
+		if !slices.Contains(b.SupportedIterOptions(), opt.Type) {
+			return fmt.Errorf("%w: %v", objstore.ErrOptionNotSupported, opt.Type)
+		}
+	}
+
 	// Ensure the object name actually ends with a dir suffix. Otherwise we'll just iterate the
 	// object itself as one prefix item.
 	if dir != "" {
 		dir = strings.TrimSuffix(dir, DirDelim) + DirDelim
 	}
 
+	appliedOpts := objstore.ApplyIterOptions(options...)
+
 	opts := minio.ListObjectsOptions{
 		Prefix:    dir,
-		Recursive: objstore.ApplyIterOptions(options...).Recursive,
+		Recursive: appliedOpts.Recursive,
 		UseV1:     b.listObjectsV1,
 	}
 
@@ -413,12 +424,35 @@ func (b *Bucket) Iter(ctx context.Context, dir string, f func(name string, attrs
 		if object.Key == dir {
 			continue
 		}
-		if err := f(object.Key, objstore.EmptyObjectAttributes); err != nil {
+
+		attr := objstore.IterObjectAttributes{
+			Name: object.Key,
+		}
+		if appliedOpts.LastModified {
+			attr.SetLastModified(object.LastModified)
+		}
+
+		if err := f(attr); err != nil {
 			return err
 		}
 	}
 
 	return ctx.Err()
+}
+
+func (b *Bucket) Iter(ctx context.Context, dir string, f func(string) error, opts ...objstore.IterOption) error {
+	// Only include recursive option since attributes are not used in this method.
+	var filteredOpts []objstore.IterOption
+	for _, opt := range opts {
+		if opt.Type == objstore.Recursive {
+			filteredOpts = append(filteredOpts, opt)
+			break
+		}
+	}
+
+	return b.IterWithAttributes(ctx, dir, func(attrs objstore.IterObjectAttributes) error {
+		return f(attrs.Name)
+	}, filteredOpts...)
 }
 
 func (b *Bucket) getRange(ctx context.Context, name string, off, length int64) (io.ReadCloser, error) {
@@ -609,7 +643,7 @@ func NewTestBucketFromConfig(t testing.TB, location string, c Config, reuseBucke
 
 	bktToCreate := c.Bucket
 	if c.Bucket != "" && reuseBucket {
-		if err := b.Iter(ctx, "", func(f string, _ objstore.ObjectAttributes) error {
+		if err := b.Iter(ctx, "", func(string) error {
 			return errors.Errorf("bucket %s is not empty", c.Bucket)
 		}); err != nil {
 			return nil, nil, errors.Wrapf(err, "s3 check bucket %s", c.Bucket)
