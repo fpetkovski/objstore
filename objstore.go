@@ -6,11 +6,13 @@ package objstore
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"io"
 	"io/fs"
 	"os"
 	"path"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -142,7 +144,7 @@ func WithRecursiveIter() IterOption {
 // WithUpdatedAt is an option that can be applied to Iter() to
 // include the last modified time in the attributes.
 // NB: Prefixes may not report last modified time.
-// This option is currently supported for the GCS and Filesystem providers.
+// This option is currently supported for the azure, aws, bos, gcs and filesystem providers.
 func WithUpdatedAt() IterOption {
 	return IterOption{
 		Type: UpdatedAt,
@@ -156,6 +158,16 @@ func WithUpdatedAt() IterOption {
 type IterParams struct {
 	Recursive    bool
 	LastModified bool
+}
+
+func ValidateIterOptions(supportedOptions []IterOptionType, options ...IterOption) error {
+	for _, opt := range options {
+		if !slices.Contains(supportedOptions, opt.Type) {
+			return fmt.Errorf("%w: %v", ErrOptionNotSupported, opt.Type)
+		}
+	}
+
+	return nil
 }
 
 func ApplyIterOptions(options ...IterOption) IterParams {

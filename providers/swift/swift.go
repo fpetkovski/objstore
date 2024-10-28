@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -242,10 +241,8 @@ func (c *Container) Iter(ctx context.Context, dir string, f func(string) error, 
 }
 
 func (c *Container) IterWithAttributes(ctx context.Context, dir string, f func(attrs objstore.IterObjectAttributes) error, options ...objstore.IterOption) error {
-	for _, opt := range options {
-		if !slices.Contains(c.SupportedIterOptions(), opt.Type) {
-			return fmt.Errorf("%w: %v", objstore.ErrOptionNotSupported, opt.Type)
-		}
+	if err := objstore.ValidateIterOptions(c.SupportedIterOptions(), options...); err != nil {
+		return err
 	}
 
 	return c.Iter(ctx, dir, func(name string) error {

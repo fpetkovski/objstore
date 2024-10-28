@@ -6,9 +6,7 @@ package objstore
 import (
 	"bytes"
 	"context"
-	"fmt"
 	"io"
-	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -113,10 +111,8 @@ func (i *InMemBucket) SupportedIterOptions() []IterOptionType {
 }
 
 func (b *InMemBucket) IterWithAttributes(ctx context.Context, dir string, f func(attrs IterObjectAttributes) error, options ...IterOption) error {
-	for _, opt := range options {
-		if !slices.Contains(b.SupportedIterOptions(), opt.Type) {
-			return fmt.Errorf("%w: %v", ErrOptionNotSupported, opt.Type)
-		}
+	if err := ValidateIterOptions(b.SupportedIterOptions(), options...); err != nil {
+		return err
 	}
 
 	return b.Iter(ctx, dir, func(name string) error {

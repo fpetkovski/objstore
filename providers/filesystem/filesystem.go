@@ -9,7 +9,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"slices"
 
 	"github.com/efficientgo/core/errcapture"
 	"github.com/pkg/errors"
@@ -60,10 +59,8 @@ func (b *Bucket) IterWithAttributes(ctx context.Context, dir string, f func(attr
 		return ctx.Err()
 	}
 
-	for _, opt := range options {
-		if !slices.Contains(b.SupportedIterOptions(), opt.Type) {
-			return fmt.Errorf("%w: %v", objstore.ErrOptionNotSupported, opt.Type)
-		}
+	if err := objstore.ValidateIterOptions(b.SupportedIterOptions(), options...); err != nil {
+		return err
 	}
 
 	params := objstore.ApplyIterOptions(options...)

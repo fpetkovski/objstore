@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -133,10 +132,8 @@ func (b *Bucket) Iter(ctx context.Context, dir string, f func(string) error, opt
 }
 
 func (b *Bucket) IterWithAttributes(ctx context.Context, dir string, f func(attrs objstore.IterObjectAttributes) error, options ...objstore.IterOption) error {
-	for _, opt := range options {
-		if !slices.Contains(b.SupportedIterOptions(), opt.Type) {
-			return fmt.Errorf("%w: %v", objstore.ErrOptionNotSupported, opt.Type)
-		}
+	if err := objstore.ValidateIterOptions(b.SupportedIterOptions(), options...); err != nil {
+		return err
 	}
 
 	return b.Iter(ctx, dir, func(name string) error {

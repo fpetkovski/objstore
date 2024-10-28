@@ -5,10 +5,8 @@ package azure
 
 import (
 	"context"
-	"fmt"
 	"io"
 	"os"
-	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -187,10 +185,8 @@ func (b *Bucket) SupportedIterOptions() []objstore.IterOptionType {
 }
 
 func (b *Bucket) IterWithAttributes(ctx context.Context, dir string, f func(attrs objstore.IterObjectAttributes) error, options ...objstore.IterOption) error {
-	for _, opt := range options {
-		if !slices.Contains(b.SupportedIterOptions(), opt.Type) {
-			return fmt.Errorf("%w: %v", objstore.ErrOptionNotSupported, opt.Type)
-		}
+	if err := objstore.ValidateIterOptions(b.SupportedIterOptions(), options...); err != nil {
+		return err
 	}
 
 	prefix := dir
