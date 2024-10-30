@@ -246,16 +246,7 @@ type ObjectAttributes struct {
 
 type IterObjectAttributes struct {
 	Name         string
-	lastModified time.Time
-}
-
-func (i *IterObjectAttributes) SetLastModified(t time.Time) {
-	i.lastModified = t
-}
-
-// LastModified returns the timestamp the object was last modified. Returns false if the timestamp is not available.
-func (i *IterObjectAttributes) LastModified() (time.Time, bool) {
-	return i.lastModified, !i.lastModified.IsZero()
+	LastModified time.Time
 }
 
 // TryToGetSize tries to get upfront size from reader.

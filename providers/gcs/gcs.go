@@ -204,10 +204,21 @@ func (b *Bucket) IterWithAttributes(ctx context.Context, dir string, f func(attr
 		delimiter = ""
 	}
 
-	it := b.bkt.Objects(ctx, &storage.Query{
+	query := &storage.Query{
 		Prefix:    dir,
 		Delimiter: delimiter,
-	})
+	}
+
+	if appliedOpts.LastModified {
+		if err := query.SetAttrSelection([]string{"Name", "Updated"}); err != nil {
+			return err
+		}
+	} else {
+		if err := query.SetAttrSelection([]string{"Name"}); err != nil {
+			return err
+		}
+	}
+	it := b.bkt.Objects(ctx, query)
 	for {
 		select {
 		case <-ctx.Done():
@@ -222,9 +233,9 @@ func (b *Bucket) IterWithAttributes(ctx context.Context, dir string, f func(attr
 			return err
 		}
 
-		objAttrs := objstore.IterObjectAttributes{Name: attrs.Prefix + attrs.Name}
-		if appliedOpts.LastModified {
-			objAttrs.SetLastModified(attrs.Updated)
+		objAttrs := objstore.IterObjectAttributes{
+			Name:         attrs.Prefix + attrs.Name,
+			LastModified: attrs.Updated,
 		}
 		if err := f(objAttrs); err != nil {
 			return err

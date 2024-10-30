@@ -428,7 +428,7 @@ func (b *Bucket) IterWithAttributes(ctx context.Context, dir string, f func(attr
 			Name: object.Key,
 		}
 		if appliedOpts.LastModified {
-			attr.SetLastModified(object.LastModified)
+			attr.LastModified = object.LastModified
 		}
 
 		if err := f(attr); err != nil {

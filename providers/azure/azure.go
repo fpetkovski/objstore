@@ -221,7 +221,7 @@ func (b *Bucket) IterWithAttributes(ctx context.Context, dir string, f func(attr
 					Name: *blob.Name,
 				}
 				if params.LastModified {
-					attrs.SetLastModified(*blob.Properties.LastModified)
+					attrs.LastModified = *blob.Properties.LastModified
 				}
 				if err := f(attrs); err != nil {
 					return err
@@ -243,7 +243,7 @@ func (b *Bucket) IterWithAttributes(ctx context.Context, dir string, f func(attr
 				Name: *blobItem.Name,
 			}
 			if params.LastModified {
-				attrs.SetLastModified(*blobItem.Properties.LastModified)
+				attrs.LastModified = *blobItem.Properties.LastModified
 			}
 			if err := f(attrs); err != nil {
 				return err

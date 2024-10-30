@@ -117,7 +117,7 @@ func (b *Bucket) IterWithAttributes(ctx context.Context, dir string, f func(attr
 			if err != nil {
 				return errors.Wrapf(err, "stat %s", name)
 			}
-			attrs.SetLastModified(stat.ModTime())
+			attrs.LastModified = stat.ModTime()
 		}
 		if err := f(attrs); err != nil {
 			return err

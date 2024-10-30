@@ -223,7 +223,7 @@ func (b *Bucket) IterWithAttributes(ctx context.Context, dir string, f func(attr
 				if err != nil {
 					return fmt.Errorf("iter: get last modified: %w", err)
 				}
-				attrs.SetLastModified(lastModified)
+				attrs.LastModified = lastModified
 			}
 
 			if err := f(attrs); err != nil {
